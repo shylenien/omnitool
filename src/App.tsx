@@ -6,8 +6,10 @@ import { CategoryPage } from './pages/CategoryPage';
 import { ToolPage } from './pages/ToolPage';
 
 export const App: React.FC = () => {
+  const baseUrl = (import.meta as any).env?.BASE_URL || '/';
+
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={baseUrl}>
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<HomePage />} />
