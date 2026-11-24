@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -30,13 +30,21 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Build Omni Tool Production
-        run: npm run build
-
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload Artifact
+      - name: Build Omni Tool Production
+        run: npm run build
+
+      - name: Deploy to gh-pages branch (Branch method)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          keep_files: false
+          force_orphan: true
+
+      - name: Upload Artifact (Actions method)
         uses: actions/upload-pages-artifact@v3
         with:
           path: './dist'

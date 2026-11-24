@@ -11,14 +11,10 @@ export const Header: React.FC = () => {
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const location = useLocation();
 
-  useEffectDropdownClose(location.pathname);
-
-  function useEffectDropdownClose(pathname: string) {
-    React.useEffect(() => {
-      setActiveDropdown(null);
-      setIsMobileMenuOpen(false);
-    }, [pathname]);
-  }
+  React.useEffect(() => {
+    setActiveDropdown(null);
+    setIsMobileMenuOpen(false);
+  }, [location.pathname]);
 
   return (
     <>

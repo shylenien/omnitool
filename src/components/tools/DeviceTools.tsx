@@ -35,7 +35,7 @@ export const DeviceInfoTool: React.FC = () => {
     setIsPinging(true);
     const start = performance.now();
     try {
-      await fetch('/?t=' + Date.now(), { method: 'HEAD', cache: 'no-store' });
+      await fetch(window.location.href, { method: 'HEAD', cache: 'no-store' });
       setRealPing(Math.max(1, Math.round(performance.now() - start)));
     } catch {
       setRealPing(network.rtt || 8);

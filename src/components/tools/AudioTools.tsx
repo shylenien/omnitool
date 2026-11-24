@@ -13,6 +13,10 @@ export const MicrophoneTool: React.FC = () => {
   const startMic = async () => {
     try {
       setError(null);
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setError('Trình duyệt hoặc môi trường hiện tại không hỗ trợ truy cập microphone.');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
@@ -117,6 +121,10 @@ export const SpectrumTool: React.FC = () => {
 
   const startSpectrum = async () => {
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('Trình duyệt hoặc môi trường hiện tại không hỗ trợ truy cập microphone.');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
@@ -332,8 +340,8 @@ export const FrequencyGeneratorTool: React.FC = () => {
   const toggleSound = () => {
     if (isPlaying) {
       if (oscRef.current) {
-        oscRef.current.stop();
-        oscRef.current.disconnect();
+        try { oscRef.current.stop(); } catch (_) {}
+        try { oscRef.current.disconnect(); } catch (_) {}
       }
       setIsPlaying(false);
     } else {
@@ -364,8 +372,12 @@ export const FrequencyGeneratorTool: React.FC = () => {
 
   useEffect(() => {
     return () => {
-      if (oscRef.current) oscRef.current.stop();
-      if (audioCtxRef.current) audioCtxRef.current.close();
+      if (oscRef.current) {
+        try { oscRef.current.stop(); } catch (_) {}
+      }
+      if (audioCtxRef.current) {
+        try { audioCtxRef.current.close(); } catch (_) {}
+      }
     };
   }, []);
 

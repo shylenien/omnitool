@@ -8,7 +8,7 @@ interface DynamicIconProps {
 }
 
 export const DynamicIcon: React.FC<DynamicIconProps> = ({ name, className = 'w-5 h-5', size = 20 }) => {
-  // @ts-ignore
-  const IconComponent = Icons[name] || Icons.HelpCircle;
+  // Safe lookup with multiple fallbacks to guarantee React never throws invalid element exception
+  const IconComponent = (Icons as any)[name] || (Icons as any).CircleHelp || (Icons as any).HelpCircle || (() => null);
   return <IconComponent className={className} size={size} />;
 };

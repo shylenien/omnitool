@@ -12,6 +12,10 @@ export const CameraPreviewTool: React.FC = () => {
 
   const startCamera = async (deviceId?: string) => {
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('Trình duyệt hoặc môi trường hiện tại không hỗ trợ truy cập Camera/Webcam.');
+        return;
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
@@ -140,6 +144,11 @@ export const CameraResolutionTool: React.FC = () => {
   const checkResolution = async () => {
     setIsChecking(true);
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('Trình duyệt hoặc môi trường hiện tại không hỗ trợ truy cập Camera/Webcam.');
+        setIsChecking(false);
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 4096 }, height: { ideal: 2160 } } });
       const track = stream.getVideoTracks()[0];
       const settings = track.getSettings();
@@ -206,6 +215,10 @@ export const CameraFpsTool: React.FC = () => {
 
   const startFpsTest = async () => {
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('Trình duyệt hoặc môi trường hiện tại không hỗ trợ truy cập Camera/Webcam.');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       streamRef.current = stream;
       if (videoRef.current) {
