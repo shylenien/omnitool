@@ -85,3 +85,17 @@ Thư mục sản phẩm xuất ra tại `dist/`.
 * `password-generator`: Tạo ngẫu nhiên mật khẩu mạnh theo độ dài, ký tự đặc biệt và đo độ an toàn.
 * `color-picker`: Bảng chọn màu trực quan, trích xuất và chuyển đổi tức thì giữa HEX, RGB, HSL.
 * `json-formatter`: Kiểm tra lỗi cú pháp, làm đẹp (Format indent) hoặc nén (Minify) chuỗi dữ liệu JSON.
+
+---
+
+## 📚 Tài Liệu Kỹ Thuật (`docs/`)
+
+- [Kiến trúc & Hướng dẫn thêm công cụ mới](docs/architecture.md)
+- [Ghi chú kỹ thuật Keyboard Tester (Fn, Dell M4800, TKL)](docs/keyboard-notes.md)
+- [Hướng dẫn triển khai GitHub Pages & Custom Domain](docs/deployment.md)
+
+---
+
+## 📄 Giấy Phép
+
+Phát hành theo giấy phép [MIT License](LICENSE).
