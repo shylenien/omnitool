@@ -13,6 +13,18 @@ export const CameraPreviewTool: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  const refreshDevices = async () => {
+    try {
+      if (!navigator.mediaDevices?.enumerateDevices) return [];
+      const allDevs = await navigator.mediaDevices.enumerateDevices();
+      const videoDevs = allDevs.filter(d => d.kind === 'videoinput');
+      setDevices(videoDevs);
+      return videoDevs;
+    } catch {
+      return [];
+    }
+  };
+
   const stopCamera = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
@@ -34,15 +46,44 @@ export const CameraPreviewTool: React.FC = () => {
 
     setIsLoading(true);
     try {
+      const hadActiveStream = !!streamRef.current;
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      // Give Windows USB UVC driver a brief moment to release the handle when toggling/switching
+      if (hadActiveStream) {
+        await new Promise(r => setTimeout(r, 150));
       }
 
-      const videoConstraints: MediaTrackConstraints = deviceId
-        ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-        : { width: { ideal: 1280 }, height: { ideal: 720 } };
+      // If no explicit deviceId, check if we can prefer a real physical/USB cam over OBS Virtual Camera
+      let targetId = deviceId;
+      if (!targetId) {
+        const knownDevs = devices.length > 0 ? devices : await refreshDevices();
+        const physicalCam = knownDevs.find(
+          d => d.deviceId && d.label && !/obs|virtual|snap|manycam|droidcam|iriun/i.test(d.label)
+        );
+        if (physicalCam) {
+          targetId = physicalCam.deviceId;
+        }
+      }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+      let stream: MediaStream;
+      try {
+        const constraints: MediaTrackConstraints = targetId
+          ? { deviceId: { exact: targetId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+          : { width: { ideal: 1280 }, height: { ideal: 720 } };
+        stream = await navigator.mediaDevices.getUserMedia({ video: constraints });
+      } catch {
+        // Fallback: relax exact deviceId / resolution in case USB cam was replugged or rejects 720p
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: targetId ? { deviceId: { ideal: targetId } } : true,
+        });
+      }
+
       streamRef.current = stream;
 
       const track = stream.getVideoTracks()[0];
@@ -50,20 +91,17 @@ export const CameraPreviewTool: React.FC = () => {
       if (settings?.width && settings?.height) {
         setStreamInfo(`${settings.width}×${settings.height}${settings.frameRate ? ` · ${Math.round(settings.frameRate)} FPS` : ''}`);
       }
-      if (!deviceId && settings?.deviceId) {
+      if (settings?.deviceId) {
         setSelectedDeviceId(settings.deviceId);
       }
 
+      setIsActive(true);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => {});
       }
-      setIsActive(true);
 
-      // Enumerate devices in background so UI appears immediately
-      navigator.mediaDevices.enumerateDevices().then(allDevs => {
-        setDevices(allDevs.filter(d => d.kind === 'videoinput'));
-      }).catch(() => {});
+      refreshDevices();
     } catch {
       setErrorMsg('Không thể mở camera. Vui lòng cấp quyền truy cập hoặc kiểm tra xem thiết bị có đang bị ứng dụng khác chiếm dụng không.');
       setIsActive(false);
@@ -73,7 +111,15 @@ export const CameraPreviewTool: React.FC = () => {
   };
 
   useEffect(() => {
-    return () => stopCamera();
+    refreshDevices();
+    const handleDeviceChange = () => {
+      refreshDevices();
+    };
+    navigator.mediaDevices?.addEventListener?.('devicechange', handleDeviceChange);
+    return () => {
+      navigator.mediaDevices?.removeEventListener?.('devicechange', handleDeviceChange);
+      stopCamera();
+    };
   }, []);
 
   const takeSnapshot = () => {
@@ -158,14 +204,17 @@ export const CameraPreviewTool: React.FC = () => {
       )}
 
       <div className="relative h-96 rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center">
-        {/* Always keep video mounted so srcObject attaches immediately on first open */}
+        {/* Always keep video visible in layout (opacity-0 when inactive) so browser never suspends decoder */}
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
+          onLoadedMetadata={e => e.currentTarget.play().catch(() => {})}
           style={{ transform: isMirrored ? 'scaleX(-1)' : 'none' }}
-          className={`w-full h-full object-contain ${isActive ? 'block' : 'hidden'}`}
+          className={`w-full h-full object-contain transition-opacity duration-150 ${
+            isActive ? 'opacity-100' : 'opacity-0 pointer-events-none absolute inset-0'
+          }`}
         />
 
         {!isActive && (
