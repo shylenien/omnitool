@@ -26,18 +26,19 @@ export const CameraPreviewTool: React.FC = () => {
   };
 
   const stopCamera = () => {
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
     }
     setIsActive(false);
     setStreamInfo('');
   };
 
-  const startCamera = async (deviceId?: string) => {
+  const startCamera = async (deviceId?: string, exactMatch = false) => {
     setErrorMsg(null);
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setErrorMsg('Trình duyệt hoặc môi trường hiện tại không hỗ trợ truy cập Camera/Webcam.');
@@ -46,20 +47,16 @@ export const CameraPreviewTool: React.FC = () => {
 
     setIsLoading(true);
     try {
-      const hadActiveStream = !!streamRef.current;
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.srcObject = null;
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
         streamRef.current = null;
       }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
-      // Give Windows USB UVC driver a brief moment to release the handle when toggling/switching
-      if (hadActiveStream) {
-        await new Promise(r => setTimeout(r, 150));
-      }
 
-      // If no explicit deviceId, check if we can prefer a real physical/USB cam over OBS Virtual Camera
+      // If no explicit deviceId, prefer a physical/USB cam over virtual cams (OBS, etc.) when labels are available
       let targetId = deviceId;
       if (!targetId) {
         const knownDevs = devices.length > 0 ? devices : await refreshDevices();
@@ -71,17 +68,15 @@ export const CameraPreviewTool: React.FC = () => {
         }
       }
 
+      // Let camera open at its native default resolution (avoids UVC mode-switch bugs on 058f:3841 / Brave)
       let stream: MediaStream;
       try {
-        const constraints: MediaTrackConstraints = targetId
-          ? { deviceId: { exact: targetId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-          : { width: { ideal: 1280 }, height: { ideal: 720 } };
-        stream = await navigator.mediaDevices.getUserMedia({ video: constraints });
+        const videoConstraint: boolean | MediaTrackConstraints = targetId
+          ? { deviceId: exactMatch ? { exact: targetId } : { ideal: targetId } }
+          : true;
+        stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint });
       } catch {
-        // Fallback: relax exact deviceId / resolution in case USB cam was replugged or rejects 720p
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: targetId ? { deviceId: { ideal: targetId } } : true,
-        });
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
       }
 
       streamRef.current = stream;
@@ -95,11 +90,11 @@ export const CameraPreviewTool: React.FC = () => {
         setSelectedDeviceId(settings.deviceId);
       }
 
-      setIsActive(true);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => {});
       }
+      setIsActive(true);
 
       refreshDevices();
     } catch {
@@ -149,7 +144,7 @@ export const CameraPreviewTool: React.FC = () => {
               value={selectedDeviceId}
               onChange={e => {
                 setSelectedDeviceId(e.target.value);
-                startCamera(e.target.value);
+                startCamera(e.target.value, true);
               }}
               className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-200"
             >
@@ -204,7 +199,7 @@ export const CameraPreviewTool: React.FC = () => {
       )}
 
       <div className="relative h-96 rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center">
-        {/* Always keep video visible in layout (opacity-0 when inactive) so browser never suspends decoder */}
+        {/* Keep video permanently in normal flow; overlay placeholder when inactive */}
         <video
           ref={videoRef}
           autoPlay
@@ -212,13 +207,11 @@ export const CameraPreviewTool: React.FC = () => {
           muted
           onLoadedMetadata={e => e.currentTarget.play().catch(() => {})}
           style={{ transform: isMirrored ? 'scaleX(-1)' : 'none' }}
-          className={`w-full h-full object-contain transition-opacity duration-150 ${
-            isActive ? 'opacity-100' : 'opacity-0 pointer-events-none absolute inset-0'
-          }`}
+          className="w-full h-full object-contain"
         />
 
         {!isActive && (
-          <div className="text-center text-slate-500 space-y-2 px-4">
+          <div className="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center text-center text-slate-500 space-y-2 px-4">
             {isLoading ? (
               <>
                 <Loader2 className="w-10 h-10 mx-auto animate-spin text-emerald-400" />
