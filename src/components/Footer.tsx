@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, ShieldCheck, Zap } from 'lucide-react';
-import { CATEGORIES } from '../data/tools';
+import { ShieldCheck } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 
 export const Footer: React.FC = () => {
   const currentYear = new Date().getFullYear();
@@ -13,7 +13,7 @@ export const Footer: React.FC = () => {
         <div className="md:col-span-1 space-y-3">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-              <Activity className="w-4 h-4" />
+              <BrandLogo className="w-4 h-4" />
             </div>
             <span className="font-bold text-white text-base">Omni Tool</span>
             <span className="text-[10px] text-slate-500 font-medium">by Hung Pham</span>

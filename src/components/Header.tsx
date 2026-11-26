@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, Search, ChevronDown, Menu, X } from 'lucide-react';
+import { Search, ChevronDown, Menu, X } from 'lucide-react';
 import { CATEGORIES, TOOLS } from '../data/tools';
 import { SearchModal } from './SearchModal';
 import { DynamicIcon } from './DynamicIcon';
+import { BrandLogo } from './BrandLogo';
 
 export const Header: React.FC = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -22,9 +23,9 @@ export const Header: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2.5 group">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-0.5 shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-400 p-0.5 shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform">
               <div className="w-full h-full bg-[#0a0f1d] rounded-[10px] flex items-center justify-center text-emerald-400">
-                <Activity className="w-5 h-5 animate-pulse" />
+                <BrandLogo className="w-5 h-5" />
               </div>
             </div>
             <div>
