@@ -22,7 +22,7 @@ Mỗi khi push lên nhánh `main`, workflow thực hiện song song 2 phương t
 
 ---
 
-## 3. SPA Routing & Đường dẫn tương đối
+## 3. SPA Routing & Đường dẫn sạch (BrowserRouter)
 
-- `vite.config.ts` sử dụng `base: './'` kết hợp `HashRouter` trong `src/App.tsx`, giúp web chạy ổn định trên cả tên miền riêng (`https://omni.h.ap.vn/`) lẫn đường dẫn phụ GitHub (`https://shylenien.github.io/omnitool/`).
-- [`public/404.html`](../public/404.html) tự động chuyển hướng mọi đường dẫn trực tiếp (nếu người dùng không gõ `#`) về định dạng `/#/<route>` để tránh lỗi 404.
+- `vite.config.ts` sử dụng `base: '/'` kết hợp `BrowserRouter` trong `src/App.tsx` để URL sạch đẹp không có `/#/` (ví dụ `https://omni.h.ap.vn/screen/stuck-pixel`).
+- [`public/404.html`](../public/404.html) (`pathSegmentsToKeep = 0` cho tên miền riêng) kết hợp script giải mã trong `index.html` đảm bảo khi F5 hoặc mở link trực tiếp trên GitHub Pages không bị lỗi 404. Các link cũ có `#/` cũng được tự động chuyển về URL sạch.

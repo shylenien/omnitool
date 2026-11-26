@@ -4,26 +4,18 @@
     <meta charset="utf-8">
     <title>Omni Tool - Đang chuyển hướng...</title>
     <script type="text/javascript">
-      // GitHub Pages SPA Redirect Handler
-      // Automatically normalizes direct URL paths into HashRouter routes
+      // Single Page Apps for GitHub Pages (Custom Domain Root: pathSegmentsToKeep = 0)
+      // https://github.com/rafgraph/spa-github-pages
+      var pathSegmentsToKeep = 0;
+
       var l = window.location;
-      var pathParts = l.pathname.split('/').filter(Boolean);
-      var isOmniRepo = pathParts.length > 0 && pathParts[0] === 'omnitool';
-      var basePath = isOmniRepo ? '/omnitool/' : '/';
-      var subPath = pathParts.slice(isOmniRepo ? 1 : 0).join('/');
-
-      var redirectUrl = l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') + basePath;
-      if (subPath) {
-        redirectUrl += '#/' + subPath;
-      }
-      if (l.search) {
-        redirectUrl += (subPath ? '' : '#/') + l.search;
-      }
-      if (l.hash && !subPath) {
-        redirectUrl += l.hash;
-      }
-
-      window.location.replace(redirectUrl);
+      l.replace(
+        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+        l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/?/' +
+        l.pathname.slice(1).split('/').slice(pathSegmentsToKeep).join('/').replace(/&/g, '~and~') +
+        (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+        l.hash
+      );
     </script>
   </head>
   <body>
