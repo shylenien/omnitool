@@ -25,11 +25,16 @@ export const CameraPreviewTool: React.FC = () => {
     }
   };
 
+  const resetVideoElement = () => {
+    if (!videoRef.current) return;
+    videoRef.current.pause();
+    videoRef.current.srcObject = null;
+    videoRef.current.removeAttribute('src');
+    videoRef.current.load();
+  };
+
   const stopCamera = () => {
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.srcObject = null;
-    }
+    resetVideoElement();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -47,10 +52,7 @@ export const CameraPreviewTool: React.FC = () => {
 
     setIsLoading(true);
     try {
-      if (videoRef.current) {
-        videoRef.current.pause();
-        videoRef.current.srcObject = null;
-      }
+      resetVideoElement();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
         streamRef.current = null;
