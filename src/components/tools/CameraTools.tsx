@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Download, Video, Loader2, AlertCircle } from 'lucide-react';
+import { Camera, Download, Video, Loader2, AlertCircle, Grid3X3, Maximize2, Minimize2, X } from 'lucide-react';
 
 // 1. CAMERA PREVIEW
 export const CameraPreviewTool: React.FC = () => {
@@ -7,10 +7,15 @@ export const CameraPreviewTool: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isMirrored, setIsMirrored] = useState(true);
+  const [showGrid, setShowGrid] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [flashEffect, setFlashEffect] = useState(false);
+  const [lastSnapshot, setLastSnapshot] = useState<string | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [streamInfo, setStreamInfo] = useState<string>('');
   const videoRef = useRef<HTMLVideoElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   const refreshDevices = async () => {
@@ -112,12 +117,29 @@ export const CameraPreviewTool: React.FC = () => {
     const handleDeviceChange = () => {
       refreshDevices();
     };
+    const handleFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
     navigator.mediaDevices?.addEventListener?.('devicechange', handleDeviceChange);
+    document.addEventListener('fullscreenchange', handleFsChange);
     return () => {
       navigator.mediaDevices?.removeEventListener?.('devicechange', handleDeviceChange);
+      document.removeEventListener('fullscreenchange', handleFsChange);
       stopCamera();
     };
   }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement && stageRef.current?.requestFullscreen) {
+        await stageRef.current.requestFullscreen();
+      } else if (document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+    } catch {
+      // Ignore fullscreen policy error
+    }
+  };
 
   const takeSnapshot = () => {
     if (!videoRef.current || !isActive) return;
@@ -131,9 +153,14 @@ export const CameraPreviewTool: React.FC = () => {
       ctx.scale(-1, 1);
     }
     ctx.drawImage(videoRef.current, 0, 0);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    setLastSnapshot(dataUrl);
+    setFlashEffect(true);
+    setTimeout(() => setFlashEffect(false), 180);
+
     const link = document.createElement('a');
     link.download = `webcam-snapshot-${Date.now()}.jpg`;
-    link.href = canvas.toDataURL('image/jpeg', 0.92);
+    link.href = dataUrl;
     link.click();
   };
 
@@ -159,26 +186,45 @@ export const CameraPreviewTool: React.FC = () => {
           )}
           <button
             onClick={() => setIsMirrored(!isMirrored)}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
+            className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
+              isMirrored
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+            }`}
           >
             Lật gương: {isMirrored ? 'Bật' : 'Tắt'}
           </button>
-          {streamInfo && (
-            <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-lg">
-              {streamInfo}
-            </span>
-          )}
+          <button
+            onClick={() => setShowGrid(!showGrid)}
+            className={`px-3 py-1.5 rounded-lg text-xs border flex items-center gap-1.5 transition-colors ${
+              showGrid
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+            }`}
+          >
+            <Grid3X3 className="w-3.5 h-3.5" />
+            <span>Lưới 3×3</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
           {isActive && (
-            <button
-              onClick={takeSnapshot}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 flex items-center gap-1.5"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Chụp ảnh</span>
-            </button>
+            <>
+              <button
+                onClick={takeSnapshot}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 flex items-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Chụp ảnh</span>
+              </button>
+              <button
+                onClick={toggleFullscreen}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 flex items-center gap-1.5"
+                title="Toàn màn hình"
+              >
+                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              </button>
+            </>
           )}
           <button
             disabled={isLoading}
@@ -200,7 +246,12 @@ export const CameraPreviewTool: React.FC = () => {
         </div>
       )}
 
-      <div className="relative h-96 rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center">
+      <div
+        ref={stageRef}
+        className={`relative bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center ${
+          isFullscreen ? 'w-screen h-screen rounded-none border-0' : 'h-[420px] rounded-2xl'
+        }`}
+      >
         {/* Keep video permanently in normal flow; overlay placeholder when inactive */}
         <video
           ref={videoRef}
@@ -211,6 +262,50 @@ export const CameraPreviewTool: React.FC = () => {
           style={{ transform: isMirrored ? 'scaleX(-1)' : 'none' }}
           className="w-full h-full object-contain"
         />
+
+        {/* Rule of Thirds Grid Overlay */}
+        {isActive && showGrid && (
+          <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3">
+            {Array.from({ length: 9 }).map((_, idx) => (
+              <div key={idx} className="border border-white/15" />
+            ))}
+          </div>
+        )}
+
+        {/* Live HUD badge */}
+        {isActive && (
+          <div className="absolute top-3 left-3 flex items-center gap-2 pointer-events-none">
+            <span className="px-2.5 py-1 rounded-lg bg-black/65 backdrop-blur-md border border-white/10 text-[11px] font-mono font-bold text-white flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <span>LIVE</span>
+            </span>
+            {streamInfo && (
+              <span className="px-2.5 py-1 rounded-lg bg-black/65 backdrop-blur-md border border-white/10 text-[11px] font-mono text-emerald-300">
+                {streamInfo}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Snapshot flash */}
+        {flashEffect && (
+          <div className="absolute inset-0 bg-white/70 pointer-events-none transition-opacity" />
+        )}
+
+        {/* Last snapshot thumbnail preview */}
+        {lastSnapshot && isActive && (
+          <div className="absolute bottom-3 right-3 group rounded-xl overflow-hidden border-2 border-emerald-400/70 shadow-2xl bg-slate-900 w-28">
+            <img src={lastSnapshot} alt="Ảnh vừa chụp" className="w-full h-16 object-cover" />
+            <div className="flex items-center justify-between px-1.5 py-1 bg-black/80 text-[10px] text-slate-200">
+              <a href={lastSnapshot} download={`webcam-${Date.now()}.jpg`} className="text-emerald-400 hover:underline font-semibold">
+                Lưu lại
+              </a>
+              <button onClick={() => setLastSnapshot(null)} className="text-slate-400 hover:text-white">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {!isActive && (
           <div className="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center text-center text-slate-500 space-y-2 px-4">
