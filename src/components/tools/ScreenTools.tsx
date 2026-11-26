@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Maximize2, Sparkles, Check, Info } from 'lucide-react';
+import { Play, Pause, RotateCcw, Maximize2, Minimize2, Sparkles, Check, Info, Move, Clock, AlertTriangle, Crosshair } from 'lucide-react';
 
 // 1. REFRESH RATE
 export const RefreshRateTool: React.FC = () => {
@@ -534,51 +534,552 @@ export const DeadPixelTool: React.FC = () => {
   );
 };
 
-// 8. STUCK PIXEL FIXER
-export const StuckPixelTool: React.FC = () => {
-  const [isRunning, setIsRunning] = useState(false);
-  const [speedMs, setSpeedMs] = useState(30);
-  const [color, setColor] = useState('#ff0000');
-  const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffffff', '#ffff00', '#00ffff'];
+// 8. STUCK PIXEL DETECTOR & FIXER
+const STUCK_BG_COLORS = [
+  { name: 'Đen tuyệt đối (Khuyên dùng)', hex: '#000000', textLight: true },
+  { name: 'Xám tối (10%)', hex: '#18181b', textLight: true },
+  { name: 'Đỏ thuần', hex: '#ff0000', textLight: true },
+  { name: 'Xanh lá thuần', hex: '#00ff00', textLight: false },
+  { name: 'Xanh lam thuần', hex: '#0000ff', textLight: true },
+  { name: 'Trắng', hex: '#ffffff', textLight: false },
+];
 
+const FIXER_MODES = [
+  { id: 'noise' as const, label: 'Nhiễu hạt RGB (JScreenFix)' },
+  { id: 'strobe' as const, label: 'Chớp RGB/CMYK tốc độ cao' },
+  { id: 'sweep' as const, label: 'Quét dải Subpixel' },
+];
+
+const FIXER_SIZES = [
+  { id: 'sm' as const, label: 'Nhỏ (120px)', px: 120 },
+  { id: 'md' as const, label: 'Vừa (220px)', px: 220 },
+  { id: 'lg' as const, label: 'Lớn (340px)', px: 340 },
+  { id: 'full' as const, label: 'Toàn vùng', px: 0 },
+];
+
+export const StuckPixelTool: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'detect' | 'fix'>('detect');
+
+  // Detect tab state
+  const [bgIndex, setBgIndex] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [pinnedPoint, setPinnedPoint] = useState<{ x: number; y: number } | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  // Fixer tab state
+  const [isRunning, setIsRunning] = useState(false);
+  const [fixerMode, setFixerMode] = useState<'noise' | 'strobe' | 'sweep'>('noise');
+  const [boxSizeId, setBoxSizeId] = useState<'sm' | 'md' | 'lg' | 'full'>('md');
+  const [speedMs, setSpeedMs] = useState(16);
+  const [timerMinutes, setTimerMinutes] = useState<number>(10); // 0 = unlimited
+  const [remainingSec, setRemainingSec] = useState<number>(10 * 60);
+  const [boxPos, setBoxPos] = useState({ x: 40, y: 40 });
+  const [isDragging, setIsDragging] = useState(false);
+
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wakeLockRef = useRef<any>(null);
+
+  // Fullscreen listener & keyboard shortcuts
   useEffect(() => {
-    if (!isRunning) return;
-    let idx = 0;
-    const interval = setInterval(() => {
-      idx = (idx + 1) % colors.length;
-      setColor(colors[idx]);
-    }, speedMs);
-    return () => clearInterval(interval);
-  }, [isRunning, speedMs]);
+    const onFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!document.fullscreenElement) return;
+      if (activeTab === 'detect') {
+        if (e.key === 'ArrowRight' || e.key === ' ') {
+          e.preventDefault();
+          setBgIndex(prev => (prev + 1) % STUCK_BG_COLORS.length);
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          setBgIndex(prev => (prev - 1 + STUCK_BG_COLORS.length) % STUCK_BG_COLORS.length);
+        }
+      }
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [activeTab]);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement && stageRef.current?.requestFullscreen) {
+        await stageRef.current.requestFullscreen();
+      } else if (document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+    } catch {
+      // Ignore fullscreen policy error
+    }
+  };
+
+  // Wake Lock while running fixer
+  useEffect(() => {
+    const releaseWakeLock = async () => {
+      if (wakeLockRef.current) {
+        try {
+          await wakeLockRef.current.release();
+        } catch {
+          // ignore
+        }
+        wakeLockRef.current = null;
+      }
+    };
+
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator && (navigator as any).wakeLock?.request) {
+          wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch {
+        // ignore if unsupported or denied
+      }
+    };
+
+    if (isRunning && activeTab === 'fix') {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+
+    return () => {
+      releaseWakeLock();
+    };
+  }, [isRunning, activeTab]);
+
+  // Countdown timer
+  useEffect(() => {
+    if (!isRunning || timerMinutes === 0) return;
+    const id = window.setInterval(() => {
+      setRemainingSec(prev => {
+        if (prev <= 1) {
+          setIsRunning(false);
+          return timerMinutes * 60;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isRunning, timerMinutes]);
+
+  const handleSelectTimer = (mins: number) => {
+    setTimerMinutes(mins);
+    setRemainingSec(mins * 60);
+  };
+
+  // High-speed Canvas Fixer Renderer
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || activeTab !== 'fix') return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+
+    const palette = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#00ffff', '#ff00ff', '#ffffff', '#000000'];
+
+    if (!isRunning) {
+      ctx.fillStyle = '#0b1120';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+
+    let rafId = 0;
+    let lastTick = 0;
+    let frameIdx = 0;
+
+    const renderFrame = (now: number) => {
+      rafId = requestAnimationFrame(renderFrame);
+      if (now - lastTick < speedMs) return;
+      lastTick = now;
+      frameIdx++;
+
+      const w = canvas.width;
+      const h = canvas.height;
+
+      if (fixerMode === 'noise') {
+        // Draw crisp 4x4 RGB subpixel noise blocks for fast rendering
+        const block = 4;
+        for (let y = 0; y < h; y += block) {
+          for (let x = 0; x < w; x += block) {
+            ctx.fillStyle = palette[(Math.random() * 7) | 0];
+            ctx.fillRect(x, y, block, block);
+          }
+        }
+      } else if (fixerMode === 'strobe') {
+        ctx.fillStyle = palette[frameIdx % palette.length];
+        ctx.fillRect(0, 0, w, h);
+      } else {
+        // Subpixel vertical RGB sweep
+        const stripe = 6;
+        const offset = (frameIdx * 3) % (stripe * 3);
+        const rgb = ['#ff0000', '#00ff00', '#0000ff'];
+        for (let x = -stripe * 3; x < w + stripe * 3; x += stripe) {
+          const idx = Math.abs(Math.floor((x + offset) / stripe)) % 3;
+          ctx.fillStyle = rgb[idx];
+          ctx.fillRect(x + (offset % stripe), 0, stripe, h);
+        }
+      }
+    };
+
+    rafId = requestAnimationFrame(renderFrame);
+    return () => cancelAnimationFrame(rafId);
+  }, [isRunning, fixerMode, speedMs, activeTab, boxSizeId]);
+
+  // Dragging handlers for the Fixer Box
+  const handleBoxPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (boxSizeId === 'full') return;
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setIsDragging(true);
+    dragOffsetRef.current = {
+      x: e.clientX - boxPos.x,
+      y: e.clientY - boxPos.y,
+    };
+  };
+
+  const handleBoxPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging || !stageRef.current || boxSizeId === 'full') return;
+    const stageRect = stageRef.current.getBoundingClientRect();
+    const sizePx = FIXER_SIZES.find(s => s.id === boxSizeId)?.px || 220;
+    const maxX = Math.max(0, stageRect.width - sizePx);
+    const maxY = Math.max(0, stageRect.height - sizePx);
+    const nextX = Math.min(maxX, Math.max(0, e.clientX - dragOffsetRef.current.x));
+    const nextY = Math.min(maxY, Math.max(0, e.clientY - dragOffsetRef.current.y));
+    setBoxPos({ x: nextX, y: nextY });
+  };
+
+  const handleBoxPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDragging) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      setIsDragging(false);
+    }
+  };
+
+  const handleStageClickToPin = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (activeTab !== 'detect' || !stageRef.current) return;
+    const rect = stageRef.current.getBoundingClientRect();
+    const x = Math.round(e.clientX - rect.left);
+    const y = Math.round(e.clientY - rect.top);
+    setPinnedPoint({ x, y });
+  };
+
+  const jumpToFixAtPinned = () => {
+    if (pinnedPoint && stageRef.current) {
+      const rect = stageRef.current.getBoundingClientRect();
+      const sizePx = FIXER_SIZES.find(s => s.id === boxSizeId)?.px || 220;
+      const x = Math.min(Math.max(0, rect.width - sizePx), Math.max(0, pinnedPoint.x - sizePx / 2));
+      const y = Math.min(Math.max(0, rect.height - sizePx), Math.max(0, pinnedPoint.y - sizePx / 2));
+      setBoxPos({ x, y });
+    }
+    setActiveTab('fix');
+    setIsRunning(true);
+  };
+
+  const formatTime = (sec: number) => {
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  const currentBg = STUCK_BG_COLORS[bgIndex];
+  const currentBoxSize = FIXER_SIZES.find(s => s.id === boxSizeId)?.px || 220;
 
   return (
-    <div className="space-y-6">
-      <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col items-center gap-6">
-        <div
-          style={{ backgroundColor: color }}
-          className="w-48 h-48 rounded-2xl border-4 border-slate-700 shadow-2xl flex items-center justify-center transition-colors"
-        >
-          <span className="text-xs font-black bg-black/70 text-white px-2 py-1 rounded">
-            {isRunning ? 'Đang kích hoạt...' : 'Tạm dừng'}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-4">
+    <div className="space-y-5">
+      {/* Top Mode Switcher & Controls */}
+      <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
           <button
-            onClick={() => setIsRunning(!isRunning)}
-            className={`px-6 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-colors ${
-              isRunning ? 'bg-amber-500 hover:bg-amber-400 text-slate-950' : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+            onClick={() => {
+              setIsRunning(false);
+              setActiveTab('detect');
+            }}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-colors ${
+              activeTab === 'detect' ? 'bg-emerald-500 text-slate-950' : 'text-slate-300 hover:text-white'
             }`}
           >
-            {isRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            <span>{isRunning ? 'Dừng nhấp nháy' : 'Bắt đầu kích thích Pixel'}</span>
+            1. Soi tìm điểm kẹt
+          </button>
+          <button
+            onClick={() => setActiveTab('fix')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-colors ${
+              activeTab === 'fix' ? 'bg-emerald-500 text-slate-950' : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            2. Kích thích sửa Pixel
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {activeTab === 'fix' && timerMinutes > 0 && (
+            <div className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs font-mono text-emerald-400 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              <span>{formatTime(remainingSec)}</span>
+            </div>
+          )}
+
+          <button
+            onClick={toggleFullscreen}
+            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition-colors"
+          >
+            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            <span>{isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}</span>
           </button>
         </div>
       </div>
 
-      <p className="text-xs text-slate-400 leading-relaxed">
-        Điểm ảnh bị kẹt (Stuck Pixel) thường hiển thị cố định một màu (Đỏ, Xanh lá, Xanh dương). Việc nhấp nháy các màu với tốc độ cao trong 10-30 phút có thể giúp kích thích tinh thể lỏng chuyển động trở lại trạng thái bình thường.
-      </p>
+      {/* Mode Specific Sub-Controls */}
+      {activeTab === 'detect' ? (
+        <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-slate-400 mr-1">Nền tương phản:</span>
+            {STUCK_BG_COLORS.map((c, idx) => (
+              <button
+                key={c.hex}
+                onClick={() => setBgIndex(idx)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-all ${
+                  bgIndex === idx
+                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300'
+                    : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                <span className="w-3 h-3 rounded-sm border border-white/20" style={{ backgroundColor: c.hex }} />
+                <span>{c.name.split(' (')[0]}</span>
+              </button>
+            ))}
+          </div>
+
+          {pinnedPoint && (
+            <button
+              onClick={jumpToFixAtPinned}
+              className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold flex items-center gap-1.5"
+            >
+              <Crosshair className="w-3.5 h-3.5" />
+              <span>Đặt hộp sửa tại ({pinnedPoint.x}, {pinnedPoint.y})</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Algorithm */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Chế độ phát</label>
+            <select
+              value={fixerMode}
+              onChange={e => setFixerMode(e.target.value as any)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+            >
+              {FIXER_MODES.map(m => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Box Size */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Kích thước hộp</label>
+            <select
+              value={boxSizeId}
+              onChange={e => setBoxSizeId(e.target.value as any)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+            >
+              {FIXER_SIZES.map(s => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Flash Interval */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+              Chu kỳ: {speedMs} ms (~{Math.round(1000 / speedMs)} Hz)
+            </label>
+            <input
+              type="range"
+              min={16}
+              max={150}
+              step={2}
+              value={speedMs}
+              onChange={e => setSpeedMs(Number(e.target.value))}
+              className="w-full accent-emerald-500 cursor-pointer mt-2"
+            />
+          </div>
+
+          {/* Timer */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Hẹn giờ tự dừng</label>
+            <div className="flex items-center gap-1.5">
+              <select
+                value={timerMinutes}
+                onChange={e => handleSelectTimer(Number(e.target.value))}
+                className="flex-1 px-2.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+              >
+                <option value={5}>5 phút</option>
+                <option value={10}>10 phút</option>
+                <option value={20}>20 phút</option>
+                <option value={30}>30 phút</option>
+                <option value={0}>Liên tục</option>
+              </select>
+              <button
+                onClick={() => setIsRunning(r => !r)}
+                className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors shrink-0 ${
+                  isRunning ? 'bg-amber-500 hover:bg-amber-400 text-slate-950' : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+                }`}
+              >
+                {isRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                <span>{isRunning ? 'Dừng' : 'Chạy'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Stage (Supports Fullscreen) */}
+      <div
+        ref={stageRef}
+        onClick={handleStageClickToPin}
+        style={{ backgroundColor: activeTab === 'detect' ? currentBg.hex : '#050811' }}
+        className={`relative overflow-hidden select-none border border-slate-800 transition-colors ${
+          isFullscreen ? 'w-screen h-screen rounded-none border-0' : 'h-[400px] sm:h-[460px] rounded-2xl'
+        } ${activeTab === 'detect' ? 'cursor-crosshair' : ''}`}
+      >
+        {activeTab === 'detect' ? (
+          <>
+            {/* Pinned crosshair marker */}
+            {pinnedPoint && (
+              <div
+                style={{ left: pinnedPoint.x, top: pinnedPoint.y }}
+                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+              >
+                <div className="w-8 h-8 rounded-full border-2 border-emerald-400 animate-ping opacity-50 absolute inset-0" />
+                <div className="w-8 h-8 rounded-full border border-emerald-400/90 flex items-center justify-center">
+                  <div className="w-1 h-1 rounded-full bg-emerald-400" />
+                </div>
+              </div>
+            )}
+
+            {/* Minimal floating HUD */}
+            <div
+              onClick={e => e.stopPropagation()}
+              className={`absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-[11px] font-mono flex items-center gap-3 backdrop-blur-md border ${
+                currentBg.textLight
+                  ? 'bg-black/60 text-slate-200 border-white/15'
+                  : 'bg-white/75 text-slate-900 border-black/15'
+              }`}
+            >
+              <span>Nền: <strong>{currentBg.name.split(' (')[0]}</strong></span>
+              <span className="opacity-50">|</span>
+              <span>Click vùng tối để ghim điểm kẹt</span>
+              {isFullscreen && (
+                <>
+                  <span className="opacity-50">|</span>
+                  <button
+                    onClick={() => setBgIndex(prev => (prev + 1) % STUCK_BG_COLORS.length)}
+                    className="underline font-bold"
+                  >
+                    Đổi màu (→)
+                  </button>
+                  <button onClick={toggleFullscreen} className="underline font-bold">
+                    Thoát (ESC)
+                  </button>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Draggable / Fullscreen Canvas Fixer */}
+            <div
+              onPointerDown={handleBoxPointerDown}
+              onPointerMove={handleBoxPointerMove}
+              onPointerUp={handleBoxPointerUp}
+              style={
+                boxSizeId === 'full'
+                  ? { inset: 0 }
+                  : {
+                      left: boxPos.x,
+                      top: boxPos.y,
+                      width: currentBoxSize,
+                      height: currentBoxSize,
+                    }
+              }
+              className={`absolute overflow-hidden ${
+                boxSizeId === 'full'
+                  ? 'w-full h-full'
+                  : 'rounded-xl border-2 border-emerald-400/70 shadow-2xl shadow-emerald-500/20 cursor-grab active:cursor-grabbing touch-none'
+              }`}
+            >
+              <canvas
+                ref={canvasRef}
+                width={boxSizeId === 'full' ? 640 : currentBoxSize}
+                height={boxSizeId === 'full' ? 360 : currentBoxSize}
+                className="w-full h-full block"
+              />
+
+              {boxSizeId !== 'full' && (
+                <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded bg-black/75 text-[10px] font-mono text-emerald-300 flex items-center gap-1 pointer-events-none">
+                  <Move className="w-3 h-3" />
+                  <span>Kéo tới điểm kẹt</span>
+                </div>
+              )}
+
+              {!isRunning && (
+                <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-[2px] flex flex-col items-center justify-center p-4 text-center gap-3 pointer-events-none">
+                  <Sparkles className="w-7 h-7 text-emerald-400" />
+                  <p className="text-xs font-semibold text-slate-200 max-w-[200px]">
+                    {boxSizeId === 'full'
+                      ? 'Nhấn "Chạy" ở trên để kích thích toàn vùng'
+                      : 'Kéo ô này đè lên đúng vị trí điểm ảnh kẹt rồi nhấn "Chạy"'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {isFullscreen && (
+              <div className="absolute bottom-4 right-4 flex items-center gap-2">
+                <button
+                  onClick={() => setIsRunning(r => !r)}
+                  className="px-4 py-2 rounded-xl bg-emerald-500 text-slate-950 text-xs font-bold shadow-lg"
+                >
+                  {isRunning ? 'Tạm dừng' : 'Chạy kích thích'}
+                </button>
+                <button
+                  onClick={toggleFullscreen}
+                  className="px-4 py-2 rounded-xl bg-slate-900/90 text-slate-200 border border-slate-700 text-xs font-semibold"
+                >
+                  Thoát (ESC)
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Safety & Instructions */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-slate-300 space-y-1.5">
+          <div className="flex items-center gap-2 font-bold text-emerald-400">
+            <Info className="w-4 h-4" />
+            <span>Cách sử dụng hiệu quả</span>
+          </div>
+          <p className="text-slate-400 leading-relaxed">
+            Dùng tab <strong>Soi tìm điểm kẹt</strong> ở chế độ toàn màn hình nền đen để tìm điểm ảnh luôn sáng (đỏ/xanh/trắng). Sau đó click ghim vị trí và chuyển sang tab <strong>Kích thích sửa Pixel</strong> (khuyên dùng chế độ <em>Nhiễu hạt RGB</em> trong 10–30 phút).
+          </p>
+        </div>
+
+        <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 text-amber-200/90 space-y-1.5">
+          <div className="flex items-center gap-2 font-bold text-amber-400">
+            <AlertTriangle className="w-4 h-4" />
+            <span>Lưu ý an toàn thị giác</span>
+          </div>
+          <p className="text-amber-200/75 leading-relaxed">
+            Chế độ nhấp nháy tần số cao có thể gây khó chịu cho mắt hoặc người nhạy cảm với ánh sáng nhấp nháy. Hãy thu nhỏ kích thước hộp đúng vị trí điểm kẹt và không nhìn trực tiếp quá lâu.
+          </p>
+        </div>
+      </div>
     </div>
   );
 };
