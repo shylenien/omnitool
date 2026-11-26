@@ -4,20 +4,20 @@ Tài liệu mô tả cách dự án build và deploy tự động lên GitHub Pa
 
 ---
 
-## 1. Cơ chế Dual Deployment (`.github/workflows/deploy.yml`)
+## 1. Quy trình Deploy tự động (`.github/workflows/deploy.yml`)
 
-Mỗi khi push lên nhánh `main`, workflow thực hiện song song 2 phương thức triển khai từ thư mục `dist/`:
+Mỗi khi push lên nhánh `main`, GitHub Actions tự động:
+1. Cài đặt dependencies (`npm ci`) và build bản production (`npm run build` → xuất ra `dist/`).
+2. Đẩy toàn bộ nội dung `dist/` sang nhánh `gh-pages` bằng `peaceiris/actions-gh-pages@v4`.
+3. GitHub Pages tự động phát hành nhánh `gh-pages` ra web chính thức (thời gian chạy chỉ ~25–30 giây, không bị treo ở bước `purging_cdn`).
 
-1. **GitHub Actions Pages (Chính thức)**: Dùng `actions/configure-pages@v5`, `actions/upload-pages-artifact@v3` và `actions/deploy-pages@v4`.
-2. **Branch `gh-pages` (Dự phòng)**: Dùng `peaceiris/actions-gh-pages@v4` với quyền `contents: write` đẩy toàn bộ `dist/` lên nhánh `gh-pages`.
-
-> Lưu ý: Trong phần **Settings → Pages** của repository trên GitHub, nguồn triển khai phải đặt là **GitHub Actions** hoặc nhánh **`gh-pages`** (không dùng nhánh `main` vì `main` chứa source `.tsx` chưa biên dịch).
+> Trong **Settings → Pages → Build and deployment** của repository trên GitHub, chọn **Source: Deploy from a branch** → nhánh **`gh-pages`** / **`/ (root)`**.
 
 ---
 
 ## 2. Giữ tên miền riêng (`omni.h.ap.vn`) vĩnh viễn
 
-- Do `peaceiris/actions-gh-pages@v4` bật `keep_files: false` và `force_orphan: true`, nhánh `gh-pages` sẽ bị ghi đè hoàn toàn sau mỗi lần deploy.
+- Do `peaceiris/actions-gh-pages@v4` bật `keep_files: false` và `force_orphan: true`, nhánh `gh-pages` sẽ được làm mới hoàn toàn sau mỗi lần deploy.
 - File [`public/CNAME`](../public/CNAME) chứa tên miền `omni.h.ap.vn`. Khi chạy `npm run build`, Vite tự động copy file này sang `dist/CNAME`, đảm bảo mọi bản deploy đều giữ nguyên cấu hình tên miền riêng mà không cần thêm thủ công lại.
 
 ---
